@@ -1,0 +1,3 @@
+[submodule "deps/LPegLJ"]
+	path = deps/LPegLJ
+	url = https://github.com/sacek/LPegLJ.git
