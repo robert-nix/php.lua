@@ -66,15 +66,15 @@ local grammar = (function()
 		return pat
 	end
 	local keywords = {
-		"abstract", "and", "as", "break", "callable", "case", "catch", "class",
-		"clone", "const", "continue", "declare", "default", "do", "echo",
-		"elseif", "enddeclare", "endfor", "endforeach", "endif", "endswitch",
-		"endwhile", "extends", "final", "finally", "for", "foreach", "function",
-		"global", "goto", "if", "implements", "include", "include_once",
-		"instanceof", "insteadof", "interface", "namespace", "new", "or",
-		"print", "private", "protected", "public", "require", "require_once",
-		"return", "static", "switch", "throw", "trait", "try", "use", "var",
-		"while", "xor", "yield"
+		"require_once", "include_once", "instanceof", "implements",
+		"endforeach", "enddeclare", "protected", "namespace", "interface",
+		"insteadof", "endswitch", "function", "endwhile", "continue",
+		"callable", "abstract", "require", "private", "include", "foreach",
+		"finally", "extends", "default", "declare", "switch", "static",
+		"return", "public", "global", "endfor", "elseif", "yield", "while",
+		"trait", "throw", "print", "final", "endif", "const", "clone", "class",
+		"catch", "break", "goto", "echo", "case", "xor", "var", "use", "try",
+		"new", "for", "and", "or", "if", "do", "as",
 	}
 	local function cat_ci(table)
 		-- apply + operator to everything in table:
@@ -242,11 +242,11 @@ local grammar = (function()
 
 	-- Operators
 	local operators = {
-		"[", "]", "(", ")", "{", "}", ".", "->", "++", "--", "**", "*", "+",
-		"-", "~", "!", "$", "/", "%", "<<", ">>", "<", ">", "<=", ">=", "==",
-		"===", "!=", "!==", "^", "|", "&", "&&", "||", "?", ":", ";", "=",
-		"**=", "*=", "/=", "%=", "+=", "-=", ".=", "<<=", ">>=", "&=", "^=",
-		"|=", "=&", ","
+		"**=", "!==", ">>=", "===", "<<=", "++", "+=", "%=", "&&", "&=", "**",
+		"*=", ".=", "/=", "!=", "--", "->", "-=", "||", "|=", ">>", ">=", "=&",
+		"==", "<=", "<<", "^=", "+", "%", "&", "*", "$", "}", "{", "]", "[",
+		")", "(", ".", "/", "?", "!", ":", ";", ",", "-", "|", ">", "=", "<",
+		"~", "^"
 	}
 	local function cat(table)
 		-- apply + operator to everything in table:
