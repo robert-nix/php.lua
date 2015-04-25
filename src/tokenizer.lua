@@ -85,11 +85,19 @@ return (function()
 
 	-- Literals:
 	--  - Integer:
-	local decimal_literal = r"19" * r"09"^0
-	local octal_literal = p"0" * r"07"^0
+	local decimal_literal = (r"19" * r"09"^0) / function(a)
+		return tonumber(a, 10) end
+
+	local octal_literal = (p"0" * r"07"^0) / function(a)
+		return tonumber(a, 8) end
+
 	local hex_digit = r("09", "af", "AF")
-	local hex_literal = (p"0x" + p"0X") * hex_digit^-1
-	local binary_literal =  (p"0b" + p"0B") * r"01"^-1
+	local hex_literal = (p"0x" + p"0X") * (hex_digit^0) / function(a)
+		return tonumber(a, 16) end
+
+	local binary_literal =  (p"0b" + p"0B") * (r"01"^0) / function(a)
+		return tonumber(a, 2) end
+
 	local integer_literal =
 		Cg(binary_literal, "binary") +
 		Cg(hex_literal, "hex") +
@@ -103,8 +111,8 @@ return (function()
 		digit_sequence^-1 * p"." * digit_sequence +
 		digit_sequence * p"."
 	local floating_literal = Cg(
-		fractional_literal * exponent_part^-1 +
-		digit_sequence * exponent_part
+		(fractional_literal * exponent_part^-1 +
+		digit_sequence * exponent_part) / function(a) return tonumber(a) end
 	, "float")
 
 	--  - String variable substitution:
