@@ -52,7 +52,8 @@ local grammar = (function()
 		p"\\"^-1 *w* ns_name *w* p"\\" +
 		p"\\"
 	local qualified_name = ns_name_as_prefix *w* name
-	local variable_name = Cg(Ct(p"$" * name), "variable")
+	local variable_name =
+		Cg(Ct(p"$" * name) / function(a) return a.name end, "variable")
 
 	-- Keywords:
 	local function ci(str)
@@ -114,36 +115,39 @@ local grammar = (function()
 	, "float")
 
 	--  - String variable substitution:
-	local property_in_string = p"->" + name
+	local property_in_string = p"->" + Cg(name, "property")
 	local offset_in_string =
-		p"[" * (integer_literal + variable_name + name) * p"]"
+		Cg(Ct(p"[" * (integer_literal + variable_name + name) * p"]"), "offset")
 	local offset_or_property = property_in_string + offset_in_string
 	local in_string_var_expr = nil -- assigned after input is defined
-	local string_variable = Ct(Cg(lpeg.Cp(), "start") * (Cg(lpeg.Cmt(
-		Ct(Cg(lpeg.Cp(), "start") * p"${" * variable_name), function(str, i, m)
+	local string_variable = Ct(Cg(lpeg.Cp(), 1) * (Cg(lpeg.Cmt(
+		Ct(Cg(lpeg.Cp(), 1) * p"${" * variable_name), function(str, i, m)
 			local tail = in_string_var_expr:match(str:sub(i))
 			if tail == nil then return nil end
 			table.insert(tail.expr, 1, { variable = m.variable })
-			local idx = i + tail.final - 1
+			local idx = i + tail[2] - 1
 			return idx, {
 				expr = tail.expr
 			}
-		end), "create_name") + Cg(variable_name * offset_or_property^-1,
-		"name")) * Cg(lpeg.Cp(), "final"))
+		end), "create_name") + Cg(Ct(variable_name * offset_or_property^-1),
+		"name")) * Cg(lpeg.Cp(), 2))
 
 	local function fold_string_table(a, b) -- a and b may be table or char
 		local result = nil
-		if type(a) ~= "table" then
-			result = {value = a, substs = {}}
-		elseif a.name ~= nil or a.create_name ~= nil then
-			result = {value = "", substs = {a}}
+		if type(a) ~= "table" or a.name ~= nil or a.create_name ~= nil then
+			result = {a}
 		else
 			result = a
 		end
 		if type(b) ~= "table" then
-			result.value = result.value .. b
+			local last = result[#result]
+			if type(last) ~= "table" then
+				result[#result] = last .. b
+			else
+				table.insert(result, b)
+			end
 		else
-			table.insert(result.substs, b)
+			table.insert(result, b)
 		end
 		return result
 	end
@@ -225,7 +229,7 @@ local grammar = (function()
 	local dq_chars = Cf(sequence_of(dq_char), fold_string_table)
 	local dq_string_literal = Cf(C(p"b"^-1) *
 		p'"' * dq_chars^-1 * p'"', function(a, b)
-		return { prefix = a, substs = b.substs, value = b.value } end)
+		return { prefix = a, value = b } end)
 
 	--  - Heredoc string:
 	local hd_simple_escape = p"\\" * (s"vtrnfe$\\" / function(c)
@@ -241,15 +245,19 @@ local grammar = (function()
 		C(p(1) - p"\\") +
 		C(p"\\" * (p(1) - (s"Xxvtrnfe$\\" + r"07")))
 	local hd_string_literal = lpeg.Cmt(
-		p"<<<" *hw* (p'"' * C(name) * p'"' + C(name)),
+		p"<<<" *hw* Ct((p'"' * name * p'"' + name) * Cg(lpeg.Cp(), "mid")),
 		function(str, i, m)
-			local curr_heredoc = Cf(new_line * 
-				Cf((-p(m) * hd_char)^0, fold_string_table) *
-				p(m) * p";"^-1 * new_line *
-				lpeg.Cp(), function(a, b)
-					return { len = b, substs = a.substs, value = a.value } end)
+			local hd_id = new_line * p(m.name)
+			local curr_heredoc = Ct(new_line * 
+				Cf((-hd_id * hd_char)^0, fold_string_table) *
+				lpeg.Cp() * hd_id * p";"^-1 * new_line *
+				lpeg.Cp()) / function(t)
+					return { 1, t[2], value = t[1], len = t[3] } end
 			local hd_match = curr_heredoc:match(str:sub(i))
-			return i + hd_match.len - 1, hd_match
+			if hd_match == nil then return nil end
+			return i + hd_match.len - 1, {
+				m.mid, m.mid + hd_match[2] - 1, value = hd_match.value
+			}
 		end)
 
 	--  - Nowdoc string:
@@ -258,15 +266,19 @@ local grammar = (function()
 		C(p(1) - p"\\") +
 		C(p"\\" * (p(1) - (s"Xxvtrnfe$\\" + r"07")))
 	local nd_string_literal = lpeg.Cmt(
-		p"<<<" *hw* p"'" * C(name) * p"'",
+		p"<<<" *hw* Ct(p"'" * name * p"'" * Cg(lpeg.Cp(), "mid")),
 		function(str, i, m)
+			local hd_id = new_line * p(m.name)
 			local curr_nowdoc = Ct(new_line *
-				Cg(Cf((-p(m) * nd_char)^0, fold_string),
-					"value") *
-				p(m) * p";"^-1 * new_line *
-				Cg(lpeg.Cp(), "len"))
+				Cf((-p(hd_id) * nd_char)^0, fold_string) *
+				lpeg.Cp() * hd_id * p";"^-1 * new_line *
+				lpeg.Cp()) / function(t)
+					return { 1, t[2], value = t[1], len = t[3] } end
 			local nd_match = curr_nowdoc:match(str:sub(i))
-			return i + nd_match.len - 1, nd_match
+			if nd_match == nil then return nil end
+			return i + nd_match.len - 1, {
+				m.mid, m.mid + nd_match.len, value = nd_match.value
+			}
 		end)
 
 
@@ -303,18 +315,21 @@ local grammar = (function()
 
 	-- Input
 	local token = Ct(
-		variable_name +
+		Cg(lpeg.Cp(), 1) *
+		(variable_name +
 		literal +
 		operator +
 		keyword +
-		name
+		name) *
+		Cg(lpeg.Cp(), 2)
 	)
-	local input =
-		Ct(Cg(whitespace, "whitespace") + Cg(comment, "comment")) + token
+	local input = Ct(Cg(lpeg.Cp(), 1) *
+		(Cg(whitespace, "whitespace") + Cg(comment, "comment")) *
+		Cg(lpeg.Cp(), 2)) + token
 
 	in_string_var_expr = Ct(
 		Cg(Ct((-p"}" * input)^0), "expr") * p"}" *
-		Cg(lpeg.Cp(), "final"))
+		Cg(lpeg.Cp(), 2))
 
 
 	-- Script:
@@ -322,12 +337,13 @@ local grammar = (function()
 	local end_tag = p"?>"
 	local text = sequence_of(-start_tag * p(1)) -- anything but start_tag
 	local script_section = Ct(
-		C(text^-1) * -- text to echo
-		C(start_tag) * -- which start tag?
-		Ct((-p"?>" * input)^0) * -- expressions to execute
+		Cg(lpeg.Cp(), 1) *
+		Cg(text^-1, "pre_text") * -- text to echo
+		Cg(start_tag, "tag") * -- which start tag?
+		Cg(Ct((-p"?>" * input)^0), "script") * -- expressions to execute
 		(p"?>" * -- maybe end tag?
-			C(text^-1))^-1 * -- if so, more text to echo
-		Cg(lpeg.Cp(), "len")
+			Cg(text^-1, "post_text"))^-1 * -- if so, more text to echo
+		Cg(lpeg.Cp(), 2)
 	)
 	local script = Ct(script_section^0)
 
