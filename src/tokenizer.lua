@@ -30,21 +30,22 @@ return (function()
 	local w = whitespace^-1
 	-- *hw* for just horizontal whitespace
 	local hw = sequence_of(s" \t")^-1
+	-- *wc* for whitespace or comment
+	local wc = (whitespace + comment)^0
 
 	-- Names:
 	local nondigit = r"az" + r"AZ" + p"_"
 	local digit = r"09"
 	local name_nondigit = nondigit + r"\127\255"
 	local name = Cg(C(name_nondigit * (name_nondigit + digit)^0), "name")
-	local ns_name = p{"ns_name", ns_name =
-		name + name *w* p"\\" *w* v"ns_name"
-	}
-	local ns_name_as_prefix =
-		p"namespace" *w* p"\\" *w* ns_name *w* p"\\" +
-		p"namespace" *w* p"\\" +
-		p"\\"^-1 *w* ns_name *w* p"\\" +
-		p"\\"
-	local qualified_name = ns_name_as_prefix *w* name
+	local ns_name =
+		-- initial bool => relative?
+		-- namespace\name{\name*}
+		Cc(true) * p"namespace" *wc* p"\\" *wc* C(name) *(wc* p"\\" *wc* C(name))^0 +
+		-- name{\name+} or \name
+		Cc(true) * C(name) * (wc* p"\\" * C(name))^1 +
+		Cc(false) * p"\\" *wc* C(name) * (wc* p"\\" * C(name))^0
+	local qualified_name = Cg(Ct(ns_name), "qualified")
 	local variable_name =
 		Cg(Ct(p"$" * name) / function(a) return a.name end, "variable")
 
@@ -317,7 +318,8 @@ return (function()
 	-- Input
 	local token = Ct(
 		Cg(lpeg.Cp(), 1) *
-		(variable_name +
+		(qualified_name +
+		variable_name +
 		literal +
 		operator +
 		keyword +
