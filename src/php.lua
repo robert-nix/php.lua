@@ -113,12 +113,48 @@ local grammar = (function()
 		digit_sequence * exponent_part
 	, "float")
 
+	--  - String variable substitution:
+	local property_in_string = p"->" + name
+	local offset_in_string =
+		p"[" * (integer_literal + variable_name + name) * p"]"
+	local offset_or_property = property_in_string + offset_in_string
+	local in_string_var_expr = nil -- assigned after input is defined
+	local string_variable = Ct(Cg(lpeg.Cp(), "start") * (Cg(lpeg.Cmt(
+		Ct(Cg(lpeg.Cp(), "start") * p"${" * variable_name), function(str, i, m)
+			local tail = in_string_var_expr:match(str:sub(i))
+			if tail == nil then return nil end
+			table.insert(tail.expr, 1, { variable = m.variable })
+			local idx = i + tail.final - 1
+			return idx, {
+				expr = tail.expr
+			}
+		end), "create_name") + Cg(variable_name * offset_or_property^-1,
+		"name")) * Cg(lpeg.Cp(), "final"))
+
+	local function fold_string_table(a, b) -- a and b may be table or char
+		local result = nil
+		if type(a) ~= "table" then
+			result = {value = a, substs = {}}
+		elseif a.name ~= nil or a.create_name ~= nil then
+			result = {value = "", substs = {a}}
+		else
+			result = a
+		end
+		if type(b) ~= "table" then
+			result.value = result.value .. b
+		else
+			table.insert(result.substs, b)
+		end
+		return result
+	end
+
 	--  - Single-quoted string:
 	local sq_char =
 		C(p"\\"^-1 * (p(1) - s"'\\")) +
 		p"\\\\" / "\\" +
 		p"\\'" / "'"
-	local sq_chars = Cf(sequence_of(sq_char), function(a, b) return a .. b end)
+	local function fold_string(a, b) return a .. b end
+	local sq_chars = Cf(sequence_of(sq_char), fold_string)
 	local sq_string_literal = Ct(Cg(p"b"^-1, "prefix") *
 		p"'" * Cg(sq_chars^-1, "value") * p"'")
 
@@ -126,7 +162,7 @@ local grammar = (function()
 	local hex_value = C(hex_digit)
 	local codepoint_digits = sequence_of(hex_value)
 	local dq_unicode_escape = p"\\u{" * Cf(Cc'' *
-		Cf(codepoint_digits, function(a, b) return a .. b end), -- cat hex
+		Cf(codepoint_digits, fold_string), -- cat hex
 		function(a, b) -- convert to utf-8
 			local code = tonumber(b, 16)
 			if code > 0x10ffff then
@@ -153,15 +189,14 @@ local grammar = (function()
 		end) * p"}"
 
 	local dq_hex_escape = (p"\\x" + p"\\X") * Cf(Cc(0) *
-		Cf(hex_value * hex_value^-1, function(a, b) -- 1 to 2 digits
-			return a .. b end), -- cat hex
-		function(a, b) -- convert to char
+		Cf(hex_value * hex_value^-1, fold_string), -- 1 to 2 digits
+		function(a, b) -- convert hex to char
 			return string.char(tonumber(b, 16)) end)
 
 	local dq_octal_escape = p"\\" * Cf(Cc(0) *
-		Cf(C(r"07") * C(r"07")^-2, function(a, b) -- 1 to 3 digits
-			return a * 8 + b end), -- convert octal to number
-		function(a, b) return string.char(b) end) -- convert to char
+		Cf(C(r"07") * C(r"07")^-2, fold_string), -- 1 to 3 digits
+		function(a, b) -- convert octal to char
+			return string.char(tonumber(b, 8)) end)
 
 	local escape_chars = {
 		v = "\v",
@@ -184,11 +219,13 @@ local grammar = (function()
 
 	local dq_char =
 		dq_escape +
-		C((p(1) - s"\\\"")) +
+		string_variable +
+		C(p(1) - s"\\\"") +
 		p"\\" * (p(1) - (s"Xxvtrnfe$\\\"" + r"07"))
-	local dq_chars = Cf(sequence_of(dq_char), function(a, b) return a .. b end)
-	local dq_string_literal = Ct(Cg(p"b"^-1, "prefix") *
-		p'"' * Cg(dq_chars^-1, "value") * p'"')
+	local dq_chars = Cf(sequence_of(dq_char), fold_string_table)
+	local dq_string_literal = Cf(C(p"b"^-1) *
+		p'"' * dq_chars^-1 * p'"', function(a, b)
+		return { prefix = a, substs = b.substs, value = b.value } end)
 
 	--  - Heredoc string:
 	local hd_simple_escape = p"\\" * (s"vtrnfe$\\" / function(c)
@@ -200,26 +237,31 @@ local grammar = (function()
 		hd_simple_escape
 	local hd_char =
 		hd_escape +
-		C((p(1) - p"\\")) +
-		p"\\" * (p(1) - (s"Xxvtrnfe$\\" + r"07"))
+		string_variable +
+		C(p(1) - p"\\") +
+		C(p"\\" * (p(1) - (s"Xxvtrnfe$\\" + r"07")))
 	local hd_string_literal = lpeg.Cmt(
 		p"<<<" *hw* (p'"' * C(name) * p'"' + C(name)),
 		function(str, i, m)
-			local curr_heredoc = Ct(new_line * 
-				Cg(Cf((-p(m) * hd_char)^0, function(a, b) return a .. b end),
-					"value") *
+			local curr_heredoc = Cf(new_line * 
+				Cf((-p(m) * hd_char)^0, fold_string_table) *
 				p(m) * p";"^-1 * new_line *
-				Cg(lpeg.Cp(), "len"))
+				lpeg.Cp(), function(a, b)
+					return { len = b, substs = a.substs, value = a.value } end)
 			local hd_match = curr_heredoc:match(str:sub(i))
 			return i + hd_match.len - 1, hd_match
 		end)
 
 	--  - Nowdoc string:
+	local nd_char =
+		hd_escape +
+		C(p(1) - p"\\") +
+		C(p"\\" * (p(1) - (s"Xxvtrnfe$\\" + r"07")))
 	local nd_string_literal = lpeg.Cmt(
 		p"<<<" *hw* p"'" * C(name) * p"'",
 		function(str, i, m)
 			local curr_nowdoc = Ct(new_line *
-				Cg(Cf((-p(m) * hd_char)^0, function(a, b) return a .. b end),
+				Cg(Cf((-p(m) * nd_char)^0, fold_string),
 					"value") *
 				p(m) * p";"^-1 * new_line *
 				Cg(lpeg.Cp(), "len"))
@@ -257,8 +299,7 @@ local grammar = (function()
 		return pat
 	end
 	local operator = Cg(
-		C(cat(operators)) / function(str) return str:lower() end,
-		"operator")
+		C(cat(operators)) / function(str) return str:lower() end, "operator")
 
 	-- Input
 	local token = Ct(
@@ -270,6 +311,10 @@ local grammar = (function()
 	)
 	local input =
 		Ct(Cg(whitespace, "whitespace") + Cg(comment, "comment")) + token
+
+	in_string_var_expr = Ct(
+		Cg(Ct((-p"}" * input)^0), "expr") * p"}" *
+		Cg(lpeg.Cp(), "final"))
 
 
 	-- Script:
