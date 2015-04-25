@@ -227,7 +227,7 @@ return (function()
 		dq_escape +
 		string_variable +
 		C(p(1) - s"\\\"") +
-		p"\\" * (p(1) - (s"Xxvtrnfe$\\\"" + r"07"))
+		C(p"\\" * p(1)) -- dq_escape will match before this
 	local dq_chars = Cf(sequence_of(dq_char), fold_string_table)
 	local dq_string_literal = Cf(C(p"b"^-1) *
 		p'"' * dq_chars^-1 * p'"', function(a, b)
