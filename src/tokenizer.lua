@@ -233,6 +233,17 @@ return (function()
 		p'"' * dq_chars^-1 * p'"', function(a, b)
 		return { prefix = a, value = b } end)
 
+	--  - Shell-command string:
+	local shell_char =
+		dq_escape +
+		p"\\" * p"`" * Cc"`" +
+		string_variable +
+		C(p(1) - s"\\`") +
+		C(p"\\" * p(1))
+	local shell_chars = Cf(sequence_of(shell_char), fold_string_table)
+	local shell_string_literal = (p'`' * shell_chars^-1 * p'`') / function(a)
+		return { value = a } end
+
 	--  - Heredoc string:
 	local hd_simple_escape = p"\\" * (s"vtrnfe$\\" / function(c)
 		return escape_chars[c] end)
@@ -288,6 +299,7 @@ return (function()
 		Cg(nd_string_literal, "nd_string") +
 		Cg(hd_string_literal, "hd_string") +
 		Cg(dq_string_literal, "dq_string") +
+		Cg(shell_string_literal, "shell_string") +
 		Cg(sq_string_literal, "sq_string")
 
 	local literal = Cg(Ct(
