@@ -116,22 +116,28 @@ local floating_literal = Cg(
 , "float")
 
 --  - String variable substitution:
-local property_in_string = p"->" + Cg(name, "property")
+local property_in_string = p"->" * Cg(name, "property")
 local offset_in_string =
 	Cg(Ct(p"[" * (integer_literal + variable_name + name) * p"]"), "offset")
 local offset_or_property = property_in_string + offset_in_string
 local in_string_var_expr = nil -- assigned after input is defined
+local function string_var_match_expr(str, i, m)
+	local tail = in_string_var_expr:match(str:sub(i))
+	if tail == nil then return nil end
+	table.insert(tail.expr, 1, { variable = m.variable })
+	local idx = i + tail[2] - 1
+	return idx, { expr = tail.expr }
+end
 local string_variable = Ct(Cg(lpeg.Cp(), 1) * (Cg(lpeg.Cmt(
-	Ct(Cg(lpeg.Cp(), 1) * p"${" * variable_name), function(str, i, m)
-		local tail = in_string_var_expr:match(str:sub(i))
-		if tail == nil then return nil end
-		table.insert(tail.expr, 1, { variable = m.variable })
-		local idx = i + tail[2] - 1
-		return idx, {
-			expr = tail.expr
-		}
-	end), "create_name") + Cg(Ct(variable_name * offset_or_property^-1),
-	"name")) * Cg(lpeg.Cp(), 2))
+	-- variable name creation operator
+	Ct(Cg(lpeg.Cp(), 1) * p"${" * variable_name), string_var_match_expr),
+		"create_name") + Cg(lpeg.Cmt(
+	-- braced expression
+	Ct(Cg(lpeg.Cp(), 1) * p"{" * variable_name), string_var_match_expr),
+		"braced") +
+	-- plain variable name
+	Cg(Ct(variable_name * offset_or_property^-1),
+		"name")) * Cg(lpeg.Cp(), 2))
 
 local function fold_string_table(a, b) -- a and b may be table or char
 	local result = nil
@@ -211,10 +217,11 @@ local escape_chars = {
 	f = "\f",
 	e = "\27",
 	["$"] = "$",
+	["{"] = "{",
 	["\\"] = "\\",
 	['"'] = '"'
 }
-local dq_simple_escape = p"\\" * (s"vtrnfe$\\\"" / function(c)
+local dq_simple_escape = p"\\" * (s"vtrnfe${\\\"" / function(c)
 	return escape_chars[c] end)
 local dq_escape =
 	dq_unicode_escape +
@@ -244,7 +251,7 @@ local shell_string_literal = (p'`' * shell_chars^-1 * p'`') / function(a)
 	return { value = a } end
 
 --  - Heredoc string:
-local hd_simple_escape = p"\\" * (s"vtrnfe$\\" / function(c)
+local hd_simple_escape = p"\\" * (s"vtrnfe${\\" / function(c)
 	return escape_chars[c] end)
 local hd_escape =
 	dq_unicode_escape +
@@ -255,7 +262,7 @@ local hd_char =
 	hd_escape +
 	string_variable +
 	C(p(1) - p"\\") +
-	C(p"\\" * (p(1) - (s"Xxvtrnfe$\\" + r"07")))
+	C(p"\\" * p(1))
 local hd_string_literal = lpeg.Cmt(
 	p"<<<" *hw* Ct((p'"' * name * p'"' + name) * Cg(lpeg.Cp(), "mid")),
 	function(str, i, m)
@@ -276,7 +283,7 @@ local hd_string_literal = lpeg.Cmt(
 local nd_char =
 	hd_escape +
 	C(p(1) - p"\\") +
-	C(p"\\" * (p(1) - (s"Xxvtrnfe$\\" + r"07")))
+	C(p"\\" * p(1))
 local nd_string_literal = lpeg.Cmt(
 	p"<<<" *hw* Ct(p"'" * name * p"'" * Cg(lpeg.Cp(), "mid")),
 	function(str, i, m)
@@ -329,11 +336,11 @@ local operator = Cg(
 -- Input
 local token = Ct(
 	Cg(lpeg.Cp(), 1) *
-	(qualified_name +
+	(keyword +
+	qualified_name +
 	variable_name +
 	literal +
 	operator +
-	keyword +
 	name) *
 	Cg(lpeg.Cp(), 2)
 )
