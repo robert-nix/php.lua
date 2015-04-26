@@ -124,7 +124,11 @@ local in_string_var_expr = nil -- assigned after input is defined
 local function string_var_match_expr(str, i, m)
 	local tail = in_string_var_expr:match(str:sub(i))
 	if tail == nil then return nil end
-	table.insert(tail.expr, 1, { variable = m.variable })
+	if tail.expr ~= nil then
+		table.insert(tail.expr, 1, { variable = m.variable })
+	else
+		tail.expr = {{ variable = m.variable }}
+	end
 	local idx = i + tail[2] - 1
 	return idx, { expr = tail.expr }
 end
@@ -141,7 +145,8 @@ local string_variable = Ct(Cg(lpeg.Cp(), 1) * (Cg(lpeg.Cmt(
 
 local function fold_string_table(a, b) -- a and b may be table or char
 	local result = nil
-	if type(a) ~= "table" or a.name ~= nil or a.create_name ~= nil then
+	if type(a) ~= "table" or
+			a.name ~= nil or a.create_name ~= nil or a.braced ~= nil then
 		result = {a}
 	else
 		result = a
@@ -316,9 +321,9 @@ local literal = Cg(Ct(
 
 -- Operators
 local operators = {
-	"**=", "!==", ">>=", "===", "<<=", "++", "+=", "%=", "&&", "&=", "**",
-	"*=", ".=", "/=", "!=", "--", "->", "-=", "||", "|=", ">>", ">=", "=&",
-	"==", "<=", "<<", "^=", "+", "%", "&", "*", "$", "}", "{", "]", "[",
+	"**=", "!==", ">>=", "===", "<<=", "++", "+=", "%=", "&&", "&=", "**", "*=",
+	".=", "/=", "!=", "--", "->", "-=", "||", "|=", ">>", ">=", "=&", "==",
+	"<=", "<<", "^=", "=>", "::", "+", "%", "&", "*", "$", "}", "{", "]", "[",
 	")", "(", ".", "/", "?", "!", ":", ";", ",", "-", "|", ">", "=", "<",
 	"~", "^", "@"
 }
