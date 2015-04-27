@@ -409,6 +409,9 @@ local function calculate_flat_size(tokens)
 						result = result + 1
 					end
 				end
+				if literal.hd_string.semi == ";" then
+					result = result + 1
+				end
 			elseif literal.shell_string and
 					type(literal.shell_string.value) == "table" then
 				result = result + 3
@@ -421,6 +424,9 @@ local function calculate_flat_size(tokens)
 					end
 				end
 			else
+				if literal.nd_string and literal.nd_string.semi == ";" then
+					result = result + 1
+				end
 				result = result + 1
 			end
 		else
@@ -507,7 +513,6 @@ end
 -- heavy format output by the tokenizer into a list of unlinked token nodes
 local function flatten_strings(ctx, tokens)
 	local final_size = calculate_flat_size(tokens)
-	io.write('#nodes = ' .. final_size .. '\n')
 	io.flush()
 	local result = ffi.new("node[" .. final_size .. "]")
 	ffi.fill(result, ffi.sizeof("node") * final_size, 0)
@@ -585,7 +590,6 @@ local function flatten_strings(ctx, tokens)
 		else
 			error("bad token")
 		end
-		io.write(node_to_string(ctx, node) .. '\n')
 		node_idx = node_idx + 1
 	end
 	local function add_cat(i)
@@ -733,6 +737,10 @@ local function flatten_strings(ctx, tokens)
 						last_idx = last_idx + part:len()
 					end
 				end
+				if literal.hd_string.semi == ";" then
+					add_token({literal.hd_string[2] - 1, literal.hd_string[2],
+						operator = ";"})
+				end
 			elseif literal.shell_string and
 					type(literal.shell_string.value) == "table" then
 				local last_idx = token[1] + 1
@@ -764,6 +772,10 @@ local function flatten_strings(ctx, tokens)
 				end
 				add_token({token[1], token[1], operator = ")"})
 			else
+				if literal.nd_string and literal.nd_string.semi == ";" then
+					add_token({literal.nd_string[2] - 1, literal.nd_string[2],
+						operator = ";"})
+				end
 				add_token(token)
 			end
 		else
@@ -787,6 +799,7 @@ local function build_ast(ctx, scripts)
 			line_idx = 0
 		end
 	end
+	table.insert(ctx.line_lengths, 1)
 	tokens = flatten_scripts(scripts)
 	tokens = flatten_strings(ctx, tokens)
 	program = {}

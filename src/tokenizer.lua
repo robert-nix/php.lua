@@ -287,15 +287,16 @@ local hd_string_literal = lpeg.Cmt(
 	p"<<<" *hw* Ct((p'"' * name * p'"' + name) * Cg(lpeg.Cp(), "mid")),
 	function(str, i, m)
 		local hd_id = new_line * p(m.name)
-		local curr_heredoc = Ct(new_line * 
+		local curr_heredoc = Ct(new_line *
 			Cf((-hd_id * hd_char)^0 * Cc"", fold_string_table) *
-			lpeg.Cp() * hd_id * p";"^-1 * new_line *
+			lpeg.Cp() * hd_id * Cg(p";"^-1, "semi") * new_line *
 			lpeg.Cp()) / function(t)
-				return { 1, t[2], value = t[1], len = t[3] } end
+				return { 1, t[2], value = t[1], len = t[3], semi = t.semi } end
 		local hd_match = curr_heredoc:match(str:sub(i))
 		if hd_match == nil then return nil end
 		return i + hd_match.len - 1, {
-			m.mid, m.mid + hd_match[2] - 1, value = hd_match.value
+			m.mid, m.mid + hd_match[2] - 1,
+			semi = hd_match.semi, value = hd_match.value
 		}
 	end)
 
@@ -310,13 +311,14 @@ local nd_string_literal = lpeg.Cmt(
 		local hd_id = new_line * p(m.name)
 		local curr_nowdoc = Ct(new_line *
 			Cf((-p(hd_id) * nd_char)^0, fold_string) *
-			lpeg.Cp() * hd_id * p";"^-1 * new_line *
+			lpeg.Cp() * hd_id * Cg(p";"^-1, "semi") * new_line *
 			lpeg.Cp()) / function(t)
-				return { 1, t[2], value = t[1], len = t[3] } end
+				return { 1, t[2], value = t[1], len = t[3], semi = t.semi } end
 		local nd_match = curr_nowdoc:match(str:sub(i))
 		if nd_match == nil then return nil end
 		return i + nd_match.len - 1, {
-			m.mid, m.mid + nd_match.len, value = nd_match.value
+			m.mid, m.mid + nd_match.len,
+			semi = nd_match.semi, value = nd_match.value
 		}
 	end)
 
