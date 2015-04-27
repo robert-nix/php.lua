@@ -2,6 +2,11 @@ package.path = package.path .. ';deps/LPegLJ/src/?.lua'
 
 bit = require'bit'
 lpeg = require'lpeglj'
+ffi = require'ffi'
+
+ffi.cdef[[
+uint64_t strtoull(const char *str, char **str_end, int base);
+]]
 
 local v, r, p, s = lpeg.V, lpeg.R, lpeg.P, lpeg.S
 local C, Cc, Cf, Cg, Ct = lpeg.C, lpeg.Cc, lpeg.Cf, lpeg.Cg, lpeg.Ct
@@ -67,8 +72,8 @@ local keywords = {
 	"finally", "extends", "default", "declare", "switch", "static",
 	"return", "public", "global", "endfor", "elseif", "yield", "while",
 	"trait", "throw", "print", "final", "endif", "const", "clone", "class",
-	"catch", "break", "goto", "echo", "case", "xor", "var", "use", "try",
-	"new", "for", "and", "or", "if", "do", "as",
+	"catch", "break", "false", "true", "null", "goto", "echo", "case", "xor",
+	"var", "use", "try", "new", "for", "and", "or", "if", "do", "as",
 }
 local function cat_ci(table)
 	-- apply + operator to everything in table:
@@ -85,18 +90,26 @@ local keyword = Cg(
 
 -- Literals:
 --  - Integer:
-local decimal_literal = (r"19" * r"09"^0) / function(a)
-	return tonumber(a, 10) end
+local function handle_int_constant(base, prefix_len)
+	return function(a)
+		a = a:sub(prefix_len)
+		local i64 = ffi.C.strtoull(a, nil, base)
+		if ffi.errno() == 34 then
+			ffi.errno(0)
+			return tonumber(a, base)
+		else
+			return i64
+		end
+	end
+end
+local decimal_literal = (r"19" * r"09"^0) / handle_int_constant(10, 0)
 
-local octal_literal = (p"0" * r"07"^0) / function(a)
-	return tonumber(a, 8) end
+local octal_literal = (p"0" * r"07"^0) / handle_int_constant(8, 0)
 
 local hex_digit = r("09", "af", "AF")
-local hex_literal = (p"0x" + p"0X") * (hex_digit^0) / function(a)
-	return tonumber(a, 16) end
+local hex_literal = (p"0x" + p"0X") * (hex_digit^0) / handle_int_constant(16, 2)
 
-local binary_literal =  (p"0b" + p"0B") * (r"01"^0) / function(a)
-	return tonumber(a, 2) end
+local binary_literal =  (p"0b" + p"0B") * (r"01"^0) / handle_int_constant(2, 2)
 
 local integer_literal =
 	Cg(binary_literal, "binary") +
@@ -152,11 +165,13 @@ local function fold_string_table(a, b) -- a and b may be table or char
 		result = a
 	end
 	if type(b) ~= "table" then
-		local last = result[#result]
-		if type(last) ~= "table" then
-			result[#result] = last .. b
-		else
-			table.insert(result, b)
+		if b:len() > 0 then
+			local last = result[#result]
+			if type(last) ~= "table" then
+				result[#result] = last .. b
+			else
+				table.insert(result, b)
+			end
 		end
 	else
 		table.insert(result, b)
@@ -239,7 +254,7 @@ local dq_char =
 	string_variable +
 	C(p(1) - s"\\\"") +
 	C(p"\\" * p(1)) -- dq_escape will match before this
-local dq_chars = Cf(sequence_of(dq_char), fold_string_table)
+local dq_chars = Cf(sequence_of(dq_char) * Cc"", fold_string_table)
 local dq_string_literal = Cf(C(p"b"^-1) *
 	p'"' * dq_chars^-1 * p'"', function(a, b)
 	return { prefix = a, value = b } end)
@@ -251,7 +266,7 @@ local shell_char =
 	string_variable +
 	C(p(1) - s"\\`") +
 	C(p"\\" * p(1))
-local shell_chars = Cf(sequence_of(shell_char), fold_string_table)
+local shell_chars = Cf(sequence_of(shell_char) * Cc"", fold_string_table)
 local shell_string_literal = (p'`' * shell_chars^-1 * p'`') / function(a)
 	return { value = a } end
 
@@ -273,7 +288,7 @@ local hd_string_literal = lpeg.Cmt(
 	function(str, i, m)
 		local hd_id = new_line * p(m.name)
 		local curr_heredoc = Ct(new_line * 
-			Cf((-hd_id * hd_char)^0, fold_string_table) *
+			Cf((-hd_id * hd_char)^0 * Cc"", fold_string_table) *
 			lpeg.Cp() * hd_id * p";"^-1 * new_line *
 			lpeg.Cp()) / function(t)
 				return { 1, t[2], value = t[1], len = t[3] } end
@@ -341,8 +356,8 @@ local operator = Cg(
 -- Input
 local token = Ct(
 	Cg(lpeg.Cp(), 1) *
-	(keyword +
-	qualified_name +
+	(qualified_name +
+	keyword +
 	variable_name +
 	literal +
 	operator +
