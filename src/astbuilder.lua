@@ -168,7 +168,10 @@ enum {
 	TKW_VAR,
 	TKW_WHILE,
 	TKW_XOR,
-	TKW_YIELD
+	TKW_YIELD,
+	TKW_TRUE,
+	TKW_FALSE,
+	TKW_NULL
 };
 ]]
 
@@ -295,7 +298,10 @@ local kw_str_to_enum = {
 	["var"] = ffi.C.TKW_VAR,
 	["while"] = ffi.C.TKW_WHILE,
 	["xor"] = ffi.C.TKW_XOR,
-	["yield"] = ffi.C.TKW_YIELD
+	["yield"] = ffi.C.TKW_YIELD,
+	["true"] = ffi.C.TKW_TRUE,
+	["false"] = ffi.C.TKW_FALSE,
+	["null"] = ffi.C.TKW_NULL,
 }
 
 local kw_enum_to_str = {}
