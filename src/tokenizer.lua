@@ -6,10 +6,22 @@ ffi = require'ffi'
 
 ffi.cdef[[
 uint64_t strtoull(const char *str, char **str_end, int base);
+
+typedef struct lexer {
+	const char *buf;
+	uint32_t buf_len;
+	uint32_t pos;
+	uint32_t last_pos;
+	uint32_t state;
+} lexer;
 ]]
 
 local v, r, p, s = lpeg.V, lpeg.R, lpeg.P, lpeg.S
 local C, Cc, Cf, Cg, Ct = lpeg.C, lpeg.Cc, lpeg.Cf, lpeg.Cg, lpeg.Ct
+
+local ord = string.byte
+
+
 
 local function sequence_of(pat)
 	return pat^1
@@ -255,9 +267,18 @@ local dq_char =
 	C(p(1) - s"\\\"") +
 	C(p"\\" * p(1)) -- dq_escape will match before this
 local dq_chars = Cf(sequence_of(dq_char) * Cc"", fold_string_table)
-local dq_string_literal = Cf(C(p"b"^-1) *
-	p'"' * dq_chars^-1 * p'"', function(a, b)
-	return { prefix = a, value = b } end)
+local dq_string_literal = Ct(C(p"b"^-1) *
+		p'"' * dq_chars^-1 * p'"') / function(a)
+		local str = ""
+		if a[2] then
+			if #a[2] == 1 and type(a[2][1]) == "string" then
+				str = a[2][1]
+			else
+				str = a[2]
+			end
+		end
+		return { prefix = a[1], value = str }
+	end
 
 --  - Shell-command string:
 local shell_char =
@@ -338,11 +359,11 @@ local literal = Cg(Ct(
 
 -- Operators
 local operators = {
-	"**=", "!==", ">>=", "===", "<<=", "++", "+=", "%=", "&&", "&=", "**", "*=",
-	".=", "/=", "!=", "--", "->", "-=", "||", "|=", ">>", ">=", "=&", "==",
-	"<=", "<<", "^=", "=>", "::", "+", "%", "&", "*", "$", "}", "{", "]", "[",
-	")", "(", ".", "/", "?", "!", ":", ";", ",", "-", "|", ">", "=", "<",
-	"~", "^", "@"
+	"**=", "!==", ">>=", "===", "<<=", "<=>", "++", "+=", "%=", "&&", "&=",
+	"**", "*=", ".=", "/=", "!=", "--", "->", "-=", "||", "|=", ">>", ">=",
+	"=&", "==", "<=", "<<", "<>", "^=", "=>", "::", "+", "%", "&", "*", "$",
+	"}", "{", "]", "[", ")", "(", ".", "/", "?", "!", ":", ";", ",", "-", "|",
+	">", "=", "<", "~", "^", "@"
 }
 local function cat(table)
 	-- apply + operator to everything in table:

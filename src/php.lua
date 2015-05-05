@@ -38,12 +38,14 @@ else
 			table.insert(split, list:sub(i0, i))
 		end
 	end
-	for x,arg in ipairs(split) do
+	for _, arg in ipairs(split) do
 		io.write(arg .. '   ')
 		io.flush()
 		local status, err = pcall(function()
+			local context = { file_name = arg }
 			local script_file = io.open(arg, "r")
 			local script_buf = script_file:read("*a")
+			context.file_buf = script_buf
 			local tokenized = tokenizer.script:match(script_buf)
 			last_idx = 0
 			for i,j in ipairs(tokenized) do
@@ -52,7 +54,7 @@ else
 			if last_idx ~= 1 + script_buf:len() then
 				error("tokenizer didn't reach eof")
 			end
-			local tree = require("astbuilder").build_ast(tokenized)
+			local tree = require("astbuilder").build_ast(context, tokenized)
 		end)
 		io.write('\r')
 		if not status then

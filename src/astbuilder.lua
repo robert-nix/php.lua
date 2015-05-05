@@ -436,14 +436,23 @@ local function calculate_flat_size(tokens)
 	return result
 end
 
-local function char_to_linecol(line_lengths, char_idx)
+local function char_to_linecol(ctx, char_idx)
 	local line = 1
-	while true do
-		if char_idx < line_lengths[line] then
-			return line, char_idx
+	local line_lengths = ctx.line_lengths
+	local line_sums = ctx.line_sums
+	local min = 1
+	local max = #line_sums
+	while min <= max do
+		local mid = min + bit.rshift(max - min, 1)
+		local below = line_sums[mid]
+		local above = line_sums[mid + 1]
+		if below <= char_idx then
+			if above > char_idx then
+				return mid, char_idx - below
+			end
+			min = mid + 1
 		else
-			char_idx = char_idx - line_lengths[line]
-			line = line + 1
+			max = mid - 1
 		end
 	end
 	return -1, -1
@@ -462,6 +471,10 @@ end
 
 local function node_to_string(ctx, node)
 	local result = {}
+	table.insert(result, tostring(node.start_line))
+	table.insert(result, ':')
+	table.insert(result, tostring(node.start_col))
+	table.insert(result, ':')
 	if node.kind == ffi.C.TOK_KEYWORD then
 		table.insert(result, "keyword: ")
 		table.insert(result, kw_enum_to_str[node.keyword.word])
@@ -519,8 +532,8 @@ local function flatten_strings(ctx, tokens)
 	local node_idx = 0
 	local function add_token(t)
 		local node = result + node_idx
-		local start_line, start_col = char_to_linecol(ctx.line_lengths, t[1])
-		local final_line, final_col = char_to_linecol(ctx.line_lengths, t[2])
+		local start_line, start_col = char_to_linecol(ctx, t[1])
+		local final_line, final_col = char_to_linecol(ctx, t[2])
 		node.start_line = start_line
 		node.start_col = start_col
 		node.final_line = final_line
@@ -585,9 +598,13 @@ local function flatten_strings(ctx, tokens)
 				node.literal.ref = get_constant_ref(ctx,
 					t.literal.nd_string.value)
 			else
+				dump(t)
 				error("bad literal")
 			end
+		elseif t.whitespace or t.comment then
+			-- do nothing, for now.
 		else
+			dump(t)
 			error("bad token")
 		end
 		node_idx = node_idx + 1
@@ -616,8 +633,11 @@ local function flatten_strings(ctx, tokens)
 						value = subst.name.offset.name
 				}}})
 			else
-				add_token({start, final,
-					literal = subst.name.offset})
+				if subst.name.offset.variable ~= nil then
+					add_token({start, final, name = subst.name.offset})
+				else
+					add_token({start, final, literal = subst.name.offset})
+				end
 			end
 			add_token({start, final, operator = "]"})
 		end
@@ -791,6 +811,7 @@ local function build_ast(ctx, scripts)
 	ctx.constant_to_idx = {}
 	ctx.constants = {}
 	ctx.line_lengths = {}
+	ctx.line_sums = {}
 	local line_idx = 0
 	for i = 1, #ctx.file_buf do
 		line_idx = line_idx + 1
@@ -799,16 +820,28 @@ local function build_ast(ctx, scripts)
 			line_idx = 0
 		end
 	end
+	-- last line
+	table.insert(ctx.line_lengths, 1 + line_idx)
+	-- implicit newline for end-of-token positions
 	table.insert(ctx.line_lengths, 1)
+	-- sums for bsearch
+	local accum = 0
+	for i = 1, #ctx.line_lengths do
+		ctx.line_sums[i] = accum
+		accum = accum + ctx.line_lengths[i]
+	end
+	table.insert(ctx.line_sums, accum)
+	-- flatten tokens output by parser into a simple c array:
 	tokens = flatten_scripts(scripts)
 	tokens = flatten_strings(ctx, tokens)
 	program = {}
 
+	--[[
 	num_tokens = ffi.sizeof(tokens) / ffi.sizeof("node")
 	for i = 0,num_tokens-1 do
 		io.write(i .. ' = ' .. node_to_string(ctx, tokens[i]) .. '\n')
 	end
-
+	]]
 	return tokens
 end
 
